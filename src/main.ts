@@ -1,5 +1,8 @@
 import { Map as MapLibreMap, setWorkerUrl } from 'maplibre-gl';
-setWorkerUrl(new URL('maplibre-gl/dist/maplibre-gl-worker.mjs', import.meta.url).href);
+// MapLibre 6 resolves its worker relative to import.meta.url, which breaks once Vite bundles
+// the library. Let Vite build the worker (and its shared chunk) and hand MapLibre the URL.
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
+setWorkerUrl(maplibreWorkerUrl);
 import { Sim } from './sim';
 import { Metrics, type Summary } from './metrics';
 import { MapLibreEngine } from './engines/maplibre';

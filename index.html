@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Map render bench: MapLibre vs deck.gl</title>
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.11.1/dist/maplibre-gl.css" />
+    <style>
+      :root { --bg: #14171c; --panel: #1d2129; --fg: #e6e8eb; --muted: #8b93a1; --accent: #4f9cf9; --ok: #3fb950; --warn: #f0883e; --bad: #f85149; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+      #app { display: grid; grid-template-columns: 340px 1fr; height: 100%; }
+      #panel { background: var(--panel); padding: 14px; overflow: auto; border-right: 1px solid #2a2f3a; }
+      #panel h1 { font-size: 15px; margin: 0 0 10px; }
+      #panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 16px 0 6px; }
+      label { display: grid; grid-template-columns: 110px 1fr; align-items: center; gap: 8px; margin: 6px 0; }
+      select, input { width: 100%; background: #0f1216; color: var(--fg); border: 1px solid #2f3541; border-radius: 4px; padding: 5px 6px; font: inherit; }
+      button { background: var(--accent); color: #fff; border: 0; border-radius: 4px; padding: 7px 12px; font: inherit; font-weight: 600; cursor: pointer; margin: 4px 4px 4px 0; }
+      button.secondary { background: #2f3541; }
+      button:disabled { opacity: .5; cursor: default; }
+      #map { position: relative; }
+      #hud { position: absolute; top: 10px; right: 10px; z-index: 5; background: rgba(20,23,28,.88); padding: 10px 12px; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; min-width: 210px; pointer-events: none; }
+      #hud div { display: flex; justify-content: space-between; gap: 12px; }
+      #hud b { color: var(--accent); }
+      #status { color: var(--muted); margin: 8px 0; min-height: 18px; }
+      table { border-collapse: collapse; width: 100%; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      th, td { text-align: right; padding: 3px 4px; border-bottom: 1px solid #2a2f3a; white-space: nowrap; }
+      th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+      td:first-child, th:first-child { text-align: left; }
+      .good { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+      #results-wrap { overflow: auto; max-height: 45vh; margin-top: 6px; }
+      small { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="panel">
+        <h1>MapLibre vs deck.gl: moving elements</h1>
+        <small>Same simulation, same viewport, same sprite. Only the ingestion + render path differs.</small>
+        <h2>Configuration</h2>
+        <label>Engine <select id="engine">
+          <option value="maplibre-setdata">MapLibre: GeoJSON setData()</option>
+          <option value="maplibre-updatedata">MapLibre: GeoJSON updateData() (partial)</option>
+          <option value="deckgl">deck.gl over MapLibre</option>
+        </select></label>
+        <label>Elements <input id="n" type="number" value="10000" min="100" step="1000" /></label>
+        <label>Update every (ms) <input id="interval" type="number" value="20" min="4" /></label>
+        <label>Render mode <select id="mode">
+          <option value="circles">Circles (colour per element)</option>
+          <option value="icons">Rotated icons (heading)</option>
+          <option value="icons-labels">Rotated icons + text labels</option>
+        </select></label>
+        <label>Camera <select id="pan"><option value="0">Static</option><option value="1">Panning + zooming</option></select></label>
+        <label>Moving share <select id="changeRatio"><option value="1">100% of elements / tick</option><option value="0.2">20% of elements / tick</option></select></label>
+        <label>Basemap <select id="basemap"><option value="liberty">OpenFreeMap Liberty (vector)</option><option value="none">None (isolate overlay cost)</option></select></label>
+        <label>deck.gl mode <select id="interleaved"><option value="0">Overlaid (own canvas)</option><option value="1">Interleaved (map's context)</option></select></label>
+        <label>Measure (s) <input id="duration" type="number" value="10" min="3" /></label>
+        <div>
+          <button id="run">Run</button>
+          <button id="matrix" class="secondary">Run full matrix</button>
+          <button id="stop" class="secondary" disabled>Stop</button>
+        </div>
+        <div id="status">Idle</div>
+        <h2>Results <small>(persist across reloads in this tab)</small></h2>
+        <div>
+          <button id="copy" class="secondary">Copy JSON</button>
+          <button id="csv" class="secondary">Download CSV</button>
+          <button id="clear" class="secondary">Clear</button>
+        </div>
+        <div id="results-wrap"><table id="results"><thead><tr>
+          <th>engine</th><th>mode</th><th>n</th><th>ms</th><th>cam</th>
+          <th title="frames per second (rAF)">fps</th>
+          <th title="95th percentile frame time">p95 fr</th>
+          <th title="frames slower than 33 ms">slow</th>
+          <th title="main-thread ms per update spent feeding the engine">feed</th>
+          <th title="% of wall time the main thread is busy feeding">busy%</th>
+          <th title="ticks that actually ran vs requested">ticks</th>
+          <th title="distinct data generations drawn per second">upd/s</th>
+          <th title="p95 ms from feeding to on-screen">fresh p95</th>
+          <th title="long tasks (>50 ms)">LT</th>
+        </tr></thead><tbody></tbody></table></div>
+      </div>
+      <div id="map">
+        <div id="hud">
+          <div><span>engine</span><b id="hud-engine">-</b></div>
+          <div><span>elements</span><b id="hud-n">-</b></div>
+          <div><span>fps</span><b id="hud-fps">-</b></div>
+          <div><span>feed ms/tick</span><b id="hud-feed">-</b></div>
+          <div><span>drawn upd/s</span><b id="hud-applied">-</b></div>
+          <div><span>freshness ms</span><b id="hud-fresh">-</b></div>
+          <div><span>phase</span><b id="hud-phase">-</b></div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

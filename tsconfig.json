@@ -1,0 +1,7 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler", "strict": true,
+    "lib": ["ES2022", "DOM"], "types": ["geojson"], "skipLibCheck": true, "esModuleInterop": true, "allowSyntheticDefaultImports": true, "noEmit": true, "isolatedModules": true
+  },
+  "include": ["src"]
+}
